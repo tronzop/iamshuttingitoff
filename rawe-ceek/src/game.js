@@ -78,12 +78,24 @@ function createAudio() {
   if (audioCtx) return audioCtx;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   // when the audio context is created (user gesture), attempt to pre-load and decode
-  // an in-repo fallback asset at /assets/gameover.mp3 so it plays reliably at game over
+  // fallback assets at /assets/gameover.mp3 and /assets/scream.mp3
   loadAudioBufferFromUrl('/assets/gameover.mp3').then(buf => {
     if (buf) {
       gameOverBuffer = buf;
       console.info('Loaded /assets/gameover.mp3 into AudioBuffer (game-over SFX).');
       if (sfxStatusEl) sfxStatusEl.textContent = 'SFX ready: gameover.mp3';
+    }
+  }).catch(() => {});
+  loadAudioBufferFromUrl('/assets/scream.mp3').then(buf => {
+    if (buf) {
+      screamBuffer = buf;
+      console.info('Loaded /assets/scream.mp3 into AudioBuffer (close-call scream).');
+    }
+  }).catch(() => {});
+  loadAudioBufferFromUrl('/assets/pushinglikeananimal.mp3').then(buf => {
+    if (buf) {
+      pushingBuffer = buf;
+      console.info('Loaded /assets/pushinglikeananimal.mp3 into AudioBuffer (20-point milestone).');
     }
   }).catch(() => {});
   return audioCtx;
@@ -106,6 +118,13 @@ carSprite.onload = () => { carSpriteLoaded = true; if (skinStatusEl) skinStatusE
 carSprite.onerror = () => { carSpriteLoaded = false; if (skinStatusEl) skinStatusEl.textContent = 'Skin not found'; };
 // start loading (URL contains a space, encode it)
 carSprite.src = encodeURI('/assets/ferrari f1.png');
+
+// sad greg image for game over screen
+let sadGregImage = new Image();
+let sadGregLoaded = false;
+sadGregImage.onload = () => { sadGregLoaded = true; console.info('Loaded /assets/sadgreg.png'); };
+sadGregImage.onerror = () => { sadGregLoaded = false; console.warn('sadgreg.png not found'); };
+sadGregImage.src = '/assets/sadgreg.png';
 
 // processed sprite (white background removed) and hit polygon
 let carSpriteCanvas = null;       // offscreen canvas for processed sprite
@@ -239,6 +258,16 @@ let gameOverBuffer = null; // decoded AudioBuffer to play on game over
 let gameOverAudioElement = null; // fallback HTMLAudioElement if external asset exists
 let gameOverPlayed = false; // ensure we play sound only once per game over
 
+let screamBuffer = null; // decoded AudioBuffer for close-call scream (scream.mp3)
+let screamAudioElement = null; // fallback HTMLAudioElement for scream
+let lastScreamTime = 0; // debounce scream playback (min 0.3s between screams)
+
+let pushingBuffer = null; // decoded AudioBuffer for 20-point milestone (pushinglikeananimal.mp3)
+let pushingAudioElement = null; // fallback HTMLAudioElement for pushing sound
+let lastPushingMilestone = 0; // last score milestone (in multiples of 20) that triggered sound
+let gameOverTime = 0; // time since game ended (for fade/zoom animation)
+let leaderboardShowTime = 0.5; // delay before showing leaderboard popup (in seconds)
+
 function playKick(time = 0) {
   const ctx = createAudio();
   const t = ctx.currentTime + (time || 0.02);
@@ -280,13 +309,29 @@ function playSnare(time = 0, vel = 0.6) {
   src.start(t); src.stop(t + 0.3);
 }
 
-// optional fallback if an asset exists at /assets/gameover.mp3
+// optional fallback if assets exist at /assets/gameover.mp3 and /assets/scream.mp3
 function preloadAssetGameOver() {
   try {
     gameOverAudioElement = new Audio('/assets/gameover.mp3');
     if (sfxStatusEl) sfxStatusEl.textContent = 'SFX available: gameover.mp3 (fallback)';
   } catch (e) {
     gameOverAudioElement = null;
+  }
+}
+
+function preloadAssetScream() {
+  try {
+    screamAudioElement = new Audio('/assets/scream.mp3');
+  } catch (e) {
+    screamAudioElement = null;
+  }
+}
+
+function preloadAssetPushing() {
+  try {
+    pushingAudioElement = new Audio('/assets/pushinglikeananimal.mp3');
+  } catch (e) {
+    pushingAudioElement = null;
   }
 }
 
@@ -414,6 +459,8 @@ function resetGame() {
   lastTime = performance.now();
   running = true;
   gameOverPlayed = false;
+  lastPushingMilestone = 0;
+  gameOverTime = 0;
   hideGameOverPanel();
 }
 
@@ -512,6 +559,74 @@ function playGameOverSfx() {
   // last resort: try to load and play /assets/gameover.mp3 using HTMLAudio
   try {
     const a = new Audio('/assets/gameover.mp3');
+    a.play().catch(() => {});
+  } catch (e) { /* ignore */ }
+}
+
+// Play close-call scream SFX when tire gets close but doesn't hit (debounced)
+function playCloseCallScream() {
+  const now = performance.now() / 1000; // convert to seconds
+  if (now - lastScreamTime < 0.3) return; // debounce: min 0.3s between screams
+  lastScreamTime = now;
+
+  // try to ensure audio context exists
+  try {
+    createAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    if (screamBuffer) {
+      const s = audioCtx.createBufferSource();
+      s.buffer = screamBuffer;
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.8, audioCtx.currentTime); // slightly lower volume
+      s.connect(g); g.connect(audioCtx.destination);
+      s.start();
+      return;
+    }
+  } catch (e) {
+    // ignore, fall back to element
+  }
+
+  // fallback to audio element if present
+  if (screamAudioElement) {
+    try { screamAudioElement.currentTime = 0; screamAudioElement.play().catch(() => {}); } catch (e) {}
+    return;
+  }
+
+  // last resort: try to load and play /assets/scream.mp3 using HTMLAudio
+  try {
+    const a = new Audio('/assets/scream.mp3');
+    a.play().catch(() => {});
+  } catch (e) { /* ignore */ }
+}
+
+// Play pushing like an animal SFX when reaching 20-point milestones
+function playPushingSound() {
+  // try to ensure audio context exists
+  try {
+    createAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    if (pushingBuffer) {
+      const s = audioCtx.createBufferSource();
+      s.buffer = pushingBuffer;
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.9, audioCtx.currentTime);
+      s.connect(g); g.connect(audioCtx.destination);
+      s.start();
+      return;
+    }
+  } catch (e) {
+    // ignore, fall back to element
+  }
+
+  // fallback to audio element if present
+  if (pushingAudioElement) {
+    try { pushingAudioElement.currentTime = 0; pushingAudioElement.play().catch(() => {}); } catch (e) {}
+    return;
+  }
+
+  // last resort: try to load and play /assets/pushinglikeananimal.mp3 using HTMLAudio
+  try {
+    const a = new Audio('/assets/pushinglikeananimal.mp3');
     a.play().catch(() => {});
   } catch (e) { /* ignore */ }
 }
@@ -644,6 +759,7 @@ function update(dt) {
   // collision detection — circle overlap OR polygon-based hitbox if a processed sprite exists
   for (const e of enemies) {
     let hit = false;
+    let distance = 0;
 
     if (carHitPolygon && carSpriteCanvas) {
       // compute visual sprite size same as drawCar
@@ -661,15 +777,27 @@ function update(dt) {
       });
       // check circle vs polygon collision
       if (circleIntersectsPolygon(e.x, e.y, e.r, worldPoly)) hit = true;
+      // compute closest distance from enemy circle to player center for close-call detection
+      const dx = e.x - player.x;
+      const dy = e.y - player.y;
+      distance = Math.hypot(dx, dy) - e.r;
     } else {
       // fallback: circle vs circle
       const dx = e.x - player.x;
       const dy = e.y - player.y;
-      if (dx * dx + dy * dy <= (e.r + player.r) * (e.r + player.r)) hit = true;
+      const distSq = dx * dx + dy * dy;
+      distance = Math.hypot(dx, dy) - e.r;
+      if (distSq <= (e.r + player.r) * (e.r + player.r)) hit = true;
+    }
+
+    // close-call detection: enemy passes within 30px of player center but doesn't hit
+    if (!hit && running && distance < 30 && distance > 0) {
+      playCloseCallScream();
     }
 
     if (hit) {
       running = false;
+      gameOverTime = 0; // start game over animation timer
       // Stop the music/beat immediately when the game ends
       stopBeatLoop();
       isMusicOn = false;
@@ -688,8 +816,8 @@ function update(dt) {
             setTimeout(() => { if (audioCtx && audioCtx.state === 'running') audioCtx.suspend().catch(()=>{}); }, wait);
           }
         } catch (e) { /* ignore */ }
-        // show the game over panel (name input + leaderboard)
-        try { showGameOverPanel(elapsed); } catch (e) { /* ignore */ }
+        // show the game over panel after a brief delay (when sad greg animation starts with sound)
+        setTimeout(() => { try { showGameOverPanel(elapsed); } catch (e) { /* ignore */ } }, leaderboardShowTime * 1000);
       }
       break;
     }
@@ -701,6 +829,13 @@ function update(dt) {
   });
 
   elapsed += dt;
+
+  // check for 20-point milestones and play pushing sound
+  const currentMilestone = Math.floor(elapsed / 20);
+  if (currentMilestone > lastPushingMilestone && running) {
+    lastPushingMilestone = currentMilestone;
+    playPushingSound();
+  }
 
   // slowly smooth the facing angle towards targetAngle for a nice animated turn
   const angDiff = ((player.targetAngle - player.angle + Math.PI) % (Math.PI * 2)) - Math.PI;
@@ -957,9 +1092,42 @@ function frame() {
   scoreEl.textContent = `Score: ${Math.floor(elapsed)}`;
 
   if (!running) {
+    // increment game over animation timer
+    gameOverTime += dt;
+
     // show a simple game over overlay (use logical canvas size)
     const vw = canvas.width / (window.devicePixelRatio || 1);
     const vh = canvas.height / (window.devicePixelRatio || 1);
+    
+    // draw sad greg image with fade-in and zoom effect
+    if (sadGregLoaded && sadGregImage.naturalWidth && sadGregImage.naturalHeight) {
+      const maxAnimationDuration = 3; // seconds for animation to complete
+      const animProgress = Math.min(1, gameOverTime / maxAnimationDuration);
+      
+      // fade in: 0 to 1 over animation duration
+      const alpha = Math.min(1, animProgress * 1.5); // slightly faster fade
+      
+      // zoom: starts at 0.3x, zooms to fill screen by end of animation
+      const startScale = 0.3;
+      const endScale = 2.5; // oversized to fill screen with zoom
+      const scale = startScale + (endScale - startScale) * animProgress;
+      
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      
+      // center the image and apply zoom from center
+      const imgWidth = sadGregImage.naturalWidth;
+      const imgHeight = sadGregImage.naturalHeight;
+      const scaledWidth = imgWidth * scale;
+      const scaledHeight = imgHeight * scale;
+      const x = (vw - scaledWidth) / 2;
+      const y = (vh - scaledHeight) / 2;
+      
+      ctx.drawImage(sadGregImage, x, y, scaledWidth, scaledHeight);
+      ctx.restore();
+    }
+    
+    // semi-transparent dark overlay
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(0, 0, vw, vh);
     ctx.fillStyle = 'white';

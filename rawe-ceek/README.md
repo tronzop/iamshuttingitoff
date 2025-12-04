@@ -1,6 +1,6 @@
-# Dodge the Circles
+# rawe-ceek
 
-A tiny HTML5 Canvas game (plain JavaScript). Move your player with arrow keys or WASD and dodge the red enemy circles.
+A tiny HTML5 Canvas racing game (plain JavaScript). Navigate your Formula-1 car with arrow keys or WASD and dodge Pirelli tire obstacles. Survive as long as you can — every 20 points you'll hear "pushing like an animal"!
 
 ## Run (quick)
 - Open `index.html` in your browser (double-click).

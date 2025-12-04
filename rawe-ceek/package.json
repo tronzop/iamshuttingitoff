@@ -1,7 +1,7 @@
 {
-  "name": "dodge-circles",
+  "name": "rawe-ceek",
   "version": "0.1.0",
-  "description": "A tiny HTML5 Canvas dodge-the-circles game (plain JS)",
+  "description": "A tiny HTML5 Canvas racing game (plain JS) — dodge obstacles and survive as long as you can",
   "scripts": {
     "start": "npx http-server ./ -p 8080 -c-1",
     "preview": "npx serve . -l 8080",
