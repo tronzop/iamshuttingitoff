@@ -28,20 +28,11 @@
     </main>
     <!-- Game over / leaderboard overlay (hidden) -->
     <div id="gameOverPanel" class="hidden">
+        <img id="sadGregImage" src="/assets/sadgreg.png" alt="Sad Greg" />
       <div class="panel">
         <h2>Game Over</h2>
         <div class="result">Your score: <span id="finalScore">0</span></div>
-        <div class="nameRow">
-          <label for="playerName">Name</label>
-          <input id="playerName" maxlength="20" placeholder="Your name" />
-          <button id="submitScore">Submit</button>
-        </div>
-        <div class="leaderboardWrap">
-          <h3>Leaderboard</h3>
-          <ol id="leaderboardList"></ol>
-        </div>
         <div class="panelActions">
-          <button id="closeLeaderboard">Close</button>
           <button id="playAgain">Play again</button>
         </div>
       </div>

@@ -15,9 +15,33 @@ h1{position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:11; m
 footer{position:fixed; bottom:12px; left:50%; transform:translateX(-50%); z-index:11; background:rgba(14,15,20,0.85); padding:6px 12px; border-radius:6px; backdrop-filter:blur(4px);}
 
 /* Game over / leaderboard overlay */
-#gameOverPanel{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:40; pointer-events:none}
+#gameOverPanel{position:fixed; inset:0; display:flex; flex-direction: row; gap: 20px; align-items:center; justify-content:center; z-index:40; pointer-events:none}
 #gameOverPanel .panel{pointer-events:auto; background:rgba(10,12,16,0.98); color:#fff; border-radius:10px; padding:18px; width:420px; box-shadow:0 10px 40px rgba(0,0,0,0.6);}
 #gameOverPanel.hidden{display:none}
+#sadGregImage {
+  max-width: 50%;
+  height: auto;
+  animation: fadeIn 10s, zoomIn 15s;
+}
+
+@keyframes zoomIn {
+    from {
+        transform: scale(1);
+    }
+    to {
+        transform: scale(10);
+    }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .nameRow{display:flex; gap:8px; align-items:center; margin-top:8px}
 .nameRow input{flex:1; padding:6px 8px; border-radius:6px; border:1px solid #324; background:#0d1a22; color:#fff}
 .nameRow button{padding:6px 10px}

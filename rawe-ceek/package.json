@@ -5,9 +5,13 @@
   "scripts": {
     "start": "npx http-server ./ -p 8080 -c-1",
     "preview": "npx serve . -l 8080",
-    "server": "node server/index.js",
-    "start:all": "concurrently \"npm run server\" \"npm start\""
+    "export-frames": "node tools/export_frames.js",
+    "export-spritesheet": "node tools/export_spritesheet.js",
+    "export-spritesheet-trimmed": "node tools/export_spritesheet_trimmed.js"
   },
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "jimp": "^0.22.10"
+  }
 }
