@@ -13,7 +13,17 @@
   - Sprite processing helpers: `processCarSprite` and `buildHitPolygonFromImage`
   - Main loop: `frame()` renders scene and handles game-over animation
 */
-import { getBpm, createAudio, preloadAssetGameOver, playGameOverSfx, playCloseCallScream, playPushingSound, toggleMusic, stopBeatLoop, getAudioCtx, getIsMusicOn, setIsMusicOn, setUpAudioUpload } from './audio.js';
+
+// TODO: Add spacebar to keys object and 
+// TODO: Add speedBoostConfig and boost state variables
+// TODO: Add updateBoost() function
+// TODO: Call updateBoost(dt) at start of update()
+// TODO: Add drawBoostBar() function
+// TODO: Call drawBoostBar() in draw()
+// TODO: Test spacebar boost in game
+
+
+import { getBpm, createAudio, preloadAssetGameOver, playGameOverSfx, playCloseCallScream, playPushingSound, toggleMusic, stopBeatLoop, getAudioCtx, getIsMusicOn, setIsMusicOn, setUpAudioUpload, startBeatLoop } from './audio.js';
 import { spawnSmoke, updateParticles, drawParticles } from './particles.js';
 import { rand, circleIntersectsPolygon } from './utils.js';
 import { tryLoadSpriteSheet, loadCarSprite, getCarSprite, getCarSpriteLoaded, getCarSpriteSheet, getCarSpriteSheetLoaded, getCarSpriteSheetFrames, getCarSpriteSheetVertical, getCarSpriteCanvas, getCarHitPolygon } from './sprite.js';
@@ -55,11 +65,25 @@ const player = {
   exhaustIntensity: 0, // 0..1 -> more when moving fast
 };
 
-// Sprite rendering scale multiplier (controls how large sprites draw relative to `player.h`)
+// Boost config
+const speedBoostConfig = {
+  duration: 0.8, // seconds
+  cooldown: 2.5, // seconds
+  speedMultiplier: 2.5, // player.speed * multiplier
+  maxBoost: 100, // percentage
+  rechargeRate: 15, // percentage per second
+  drainRate: 100 / 0.8, // percentage per second (maxBoost / duration)
+};
+
+let boost = {
+  current: speedBoostConfig.maxBoost, // current boost level (0-100)
+  active: false, // is boost currently active
+  cooldown: 0, // current cooldown timer
+};
 const SPRITE_RENDER_SCALE = 5.5;
 
 // Input state
-const keys = { up: false, down: false, left: false, right: false };
+const keys = { up: false, down: false, left: false, right: false, space: false };
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowUp' || e.key === 'w') keys.up = true;
@@ -163,7 +187,7 @@ pauseBtn.addEventListener('click', () => {
 });
 
 musicToggle.addEventListener('click', () => {
-    setIsMusicOn(toggleMusic(musicToggle, { get elapsed() { return elapsed; } }));
+  setIsMusicOn(toggleMusic(musicToggle, { get elapsed() { return elapsed; } }));
 });
 
 
@@ -182,7 +206,28 @@ function togglePause() {
   }
 }
 
+function updateBoost(dt) {
+  if (keys.space && boost.current > 0 && boost.cooldown <= 0 && running) {
+    boost.active = true;
+    boost.current = Math.max(0, boost.current - speedBoostConfig.drainRate * dt);
+  } else {
+    boost.active = false;
+    if (boost.current < speedBoostConfig.maxBoost && boost.cooldown <= 0) {
+      boost.current = Math.min(speedBoostConfig.maxBoost, boost.current + speedBoostConfig.rechargeRate * dt);
+    }
+  }
+
+  if (boost.active && boost.current === 0) {
+    boost.cooldown = speedBoostConfig.cooldown;
+  }
+
+  if (boost.cooldown > 0) {
+    boost.cooldown = Math.max(0, boost.cooldown - dt);
+  }
+}
+
 function update(dt) {
+  updateBoost(dt);
   // Player movement
   let dx = 0,
     dy = 0;
@@ -192,8 +237,9 @@ function update(dt) {
   if (keys.down) dy += 1;
   if (dx !== 0 || dy !== 0) {
     const len = Math.hypot(dx, dy);
-    const vx = (dx / len) * player.speed;
-    const vy = (dy / len) * player.speed;
+    const currentSpeed = boost.active ? player.speed * speedBoostConfig.speedMultiplier : player.speed;
+    const vx = (dx / len) * currentSpeed;
+    const vy = (dy / len) * currentSpeed;
     player.x += vx * dt;
     player.y += vy * dt;
     // target angle should point towards movement vector (car forward)
@@ -331,6 +377,9 @@ function draw() {
   for (const e of enemies) {
     drawTyre(ctx, e.x, e.y, e.r, e.compound);
   }
+
+  // draw boost bar
+  drawBoostBar(ctx);
 }
 
 // small helper - draw a simplified, stylized Formula 1 car
@@ -426,30 +475,7 @@ function drawCar(ctx, x, y, angle, p) {
       ctx.restore();
     }
     // spawn smoke particles from the car's rear based on exhaust intensity
-    const rearLocalX = desiredW * 0.35;
-    const rearLocalY = 0;
-    // compute world position of rear using the display angle (sprite may be flipped)
-    const worldRearX =
-      x + Math.cos(displayAngle) * rearLocalX - Math.sin(displayAngle) * rearLocalY;
-    const worldRearY =
-      y + Math.sin(displayAngle) * rearLocalX + Math.cos(displayAngle) * rearLocalY;
-    // spawn a few particles probabilistically
-    if (Math.random() < p.exhaustIntensity * 0.35) {
-      const rv = 40 + Math.random() * 60;
-      const vx =
-        -Math.cos(displayAngle) * (rv * (0.6 + Math.random() * 0.6)) + (Math.random() - 0.5) * 20;
-      const vy =
-        -Math.sin(displayAngle) * (rv * (0.6 + Math.random() * 0.6)) + (Math.random() - 0.5) * 12;
-      spawnSmoke(
-        worldRearX,
-        worldRearY + (Math.random() - 0.5) * 6,
-        vx,
-        vy,
-        6 + Math.random() * 8 * p.exhaustIntensity,
-        0.9 + Math.random() * 0.9,
-        0.85
-      );
-    }
+    spawnExhaustParticles(x, y, displayAngle, p.exhaustIntensity, desiredW * 0.35, 0, 0.35, 40, 60, 0.6, 20, 12, 6, 8, 0.9, 0.9, 0.85);
     ctx.restore();
     return;
   }
@@ -556,25 +582,7 @@ function drawCar(ctx, x, y, angle, p) {
     ctx.fill();
     ctx.restore();
     // spawn smoke for vector car representation
-    const rearLocalX = p.w * 0.65;
-    const worldRearX = x + Math.cos(displayAngle) * rearLocalX - Math.sin(displayAngle) * 0;
-    const worldRearY = y + Math.sin(displayAngle) * rearLocalX + Math.cos(displayAngle) * 0;
-    if (Math.random() < p.exhaustIntensity * 0.25) {
-      const rv = 30 + Math.random() * 50;
-      const vx =
-        -Math.cos(displayAngle) * (rv * (0.6 + Math.random() * 0.6)) + (Math.random() - 0.5) * 18;
-      const vy =
-        -Math.sin(displayAngle) * (rv * (0.6 + Math.random() * 0.6)) + (Math.random() - 0.5) * 10;
-      spawnSmoke(
-        worldRearX,
-        worldRearY + (Math.random() - 0.5) * 6,
-        vx,
-        vy,
-        5 + Math.random() * 6 * p.exhaustIntensity,
-        0.8 + Math.random() * 0.6,
-        0.9
-      );
-    }
+    spawnExhaustParticles(x, y, displayAngle, p.exhaustIntensity, p.w * 0.65, 0, 0.25, 30, 50, 0.6, 18, 10, 5, 6, 0.8, 0.6, 0.9);
   }
 
   ctx.restore();
@@ -619,7 +627,79 @@ function drawWheel(ctx, ww, hh, rotation) {
   ctx.restore();
 }
 
+function drawBoostBar(ctx) {
+  const vw = canvas.width / (window.devicePixelRatio || 1);
+  const vh = canvas.height / (window.devicePixelRatio || 1);
+
+  const barWidth = 200;
+  const barHeight = 20;
+  const barX = vw - barWidth - 20;
+  const barY = vh - barHeight - 20;
+
+  // Background for the boost bar
+  ctx.fillStyle = '#333';
+  ctx.fillRect(barX, barY, barWidth, barHeight);
+
+  // Current boost level
+  const currentBoostWidth = (boost.current / speedBoostConfig.maxBoost) * barWidth;
+  ctx.fillStyle = boost.active ? '#00ffff' : '#00ff00'; // Cyan when active, green when recharging
+  ctx.fillRect(barX, barY, currentBoostWidth, barHeight);
+
+  // Boost bar border
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(barX, barY, barWidth, barHeight);
+
+  // Cooldown overlay
+  if (boost.cooldown > 0) {
+    const cooldownRatio = boost.cooldown / speedBoostConfig.cooldown;
+    ctx.fillStyle = `rgba(255, 0, 0, ${0.7 * cooldownRatio})`;
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+  }
+
+  // Boost text
+  ctx.fillStyle = '#fff';
+  ctx.font = '14px system-ui, Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('BOOST', barX + barWidth / 2, barY + barHeight / 2);
+}
+
 // draw a tyre compound (outer rubber, colored sidewall/stripe, inner hub)
+// Helper function to spawn exhaust particles
+function spawnExhaustParticles(
+  x, y, displayAngle, exhaustIntensity,
+  rearLocalX, rearLocalY,
+  spawnProbability,
+  minRv, maxRv, rvMultiplier,
+  vxRandomFactor, vyRandomFactor,
+  minSmokeSize, smokeSizeMultiplier,
+  minSmokeAlpha, smokeAlphaMultiplier,
+  smokeLifetime
+) {
+  const worldRearX =
+    x + Math.cos(displayAngle) * rearLocalX - Math.sin(displayAngle) * rearLocalY;
+  const worldRearY =
+    y + Math.sin(displayAngle) * rearLocalX + Math.cos(displayAngle) * rearRearY;
+
+  if (Math.random() < exhaustIntensity * spawnProbability) {
+    const rv = minRv + Math.random() * maxRv;
+    const vx =
+      -Math.cos(displayAngle) * (rv * (rvMultiplier + Math.random() * rvMultiplier)) + (Math.random() - 0.5) * vxRandomFactor;
+    const vy =
+      -Math.sin(displayAngle) * (rv * (rvMultiplier + Math.random() * rvMultiplier)) + (Math.random() - 0.5) * vyRandomFactor;
+    spawnSmoke(
+      worldRearX,
+      worldRearY + (Math.random() - 0.5) * 6,
+      vx,
+      vy,
+      minSmokeSize + Math.random() * smokeSizeMultiplier * exhaustIntensity,
+      minSmokeAlpha + Math.random() * smokeAlphaMultiplier,
+      smokeLifetime
+    );
+  }
+}
+
 function drawTyre(ctx, x, y, r, compound) {
   ctx.save();
   ctx.translate(x, y);
@@ -730,15 +810,15 @@ preloadAssetGameOver(sfxStatusEl);
 
 const playAgainBtn = document.getElementById('playAgain');
 playAgainBtn.addEventListener('click', () => {
-    resetGame();
+  resetGame();
 });
 
 // Kick off: if spritesheet exists it will call startGameLoopIfReady when loaded; otherwise start shortly
 loadCarSprite(skinStatusEl);
 createAudio(sfxStatusEl);
 if (getIsMusicOn()) {
-    musicToggle.classList.add('active');
-    startBeatLoop({ get elapsed() { return elapsed; } });
+  musicToggle.classList.add('active');
+  startBeatLoop({ get elapsed() { return elapsed; } });
 }
 startGameLoopIfReady();
 setUpAudioUpload(uploadSfxBtn, gameoverFileInput, sfxStatusEl);
