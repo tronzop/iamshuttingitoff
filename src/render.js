@@ -8,6 +8,15 @@ const FONT = '"Segoe UI", system-ui, Roboto, sans-serif';
 const MONO = '"Cascadia Mono", Consolas, "Roboto Mono", monospace';
 /** Damage card size (top-left, under the score); the radio strip keeps clear of it on narrow screens. */
 const DAMAGE_CARD = { w: 176, h: 50 };
+/** Tutorial tips shown one at a time after the lights, `each` seconds apiece. `[KEY]` draws a keycap. */
+const COACH = {
+  each: 3.2,
+  tips: [
+    '[▲] [▼] steer · [▶] push · [◀] lift and save the tyres',
+    '[SPACE] ERS boost · sit right behind a rival for the tow',
+    '[B] box when the window opens · [1]–[5] pick the next tyre',
+  ],
+};
 
 /** Deterministic 0..1 noise from an integer seed (for scenery that must not flicker). */
 const hash = (n) => {
@@ -1618,35 +1627,130 @@ export class Renderer {
       ctx.lineWidth = 6;
       ctx.strokeText(hud.toast.text, W / 2, H * 0.36);
       ctx.fillText(hud.toast.text, W / 2, H * 0.36);
-      if (hud.toast.sub) {
-        ctx.font = `bold 16px ${FONT}`;
-        ctx.lineWidth = 4;
-        ctx.strokeText(hud.toast.sub, W / 2, H * 0.36 + 28);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(hud.toast.sub, W / 2, H * 0.36 + 28);
-      }
+      if (hud.toast.sub) this.drawPill(hud.toast.sub, W / 2, H * 0.36 + 26);
       ctx.globalAlpha = 1;
     }
 
     // damage meter under the score card (top-left stays clear of the track), flashes on a hit
     this.drawDamage(world, hud, pad);
 
-    // controls hint: what to do on the grid (in the empty middle lane), then the basics for the first seconds of racing
+    // coach card: what to do on the grid (in the empty middle lane), then one short tip at a time for the opening seconds
+    this.drawCoach(world, W, H);
+  }
+
+  /**
+   * Tutorial pop-ups. On the grid a two-line card sits in the empty middle lane; after the
+   * lights each tip gets a few seconds on its own in the same spot, so nothing has to be
+   * read off a wall of text while the field is launching. Same card as the rest of the HUD;
+   * keys are drawn as keycaps.
+   */
+  drawCoach(world, W, H) {
+    if (world.gameOver) return;
     const sinceGo = world.racing ? world.start.sinceGo : -1;
-    if (sinceGo < 8 && !world.gameOver) {
-      ctx.globalAlpha = (sinceGo < 0 ? 1 : clamp(1 - (sinceGo - 6) / 2, 0, 1)) * 0.9;
-      ctx.textAlign = 'center';
-      ctx.font = `13px ${FONT}`;
-      ctx.fillStyle = '#fff';
-      if (sinceGo < 0) {
-        const mid = (world.trackTop + world.trackBottom) / 2;
-        ctx.fillText('Hold for the lights   ·   ▶ or SPACE the instant they go out for a GREAT START', W / 2, mid - 6);
-        ctx.fillText('A touch in the pack costs bodywork, not the race', W / 2, mid + 14);
-      } else {
-        ctx.fillText('▲▼ steer   ▶ push / ◀ lift   SPACE boost   B to box when the window opens   ·   sit behind a rival for the tow', W / 2, world.trackBottom - 22);
-      }
-      ctx.globalAlpha = 1;
+    if (sinceGo < 0) {
+      const mid = (world.trackTop + world.trackBottom) / 2;
+      this.drawCoachCard(['Hold for the lights · [▶] or [SPACE] the instant they go out for a GREAT START', 'A touch in the pack costs bodywork, not the race'], W / 2, mid, { accent: '#ff3b3b', alpha: 0.95, anchor: 'middle' });
+      return;
     }
+    const i = Math.floor(sinceGo / COACH.each);
+    if (i >= COACH.tips.length) return;
+    const t = sinceGo - i * COACH.each;
+    const alpha = clamp(Math.min(t / 0.25, (COACH.each - t) / 0.35), 0, 1) * 0.95;
+    // the middle lane again: nothing spawns during the launch, and the pack sits in the outer lanes
+    this.drawCoachCard([COACH.tips[i]], W / 2, (world.trackTop + world.trackBottom) / 2, { accent: '#ffd400', alpha, anchor: 'middle', step: `${i + 1}/${COACH.tips.length}` });
+  }
+
+  /**
+   * A dark rounded card with a coloured edge and centred lines of text; `[KEY]` becomes a
+   * keycap and ` · ` a muted separator. `anchor` says what `y` is: top, middle or bottom.
+   */
+  drawCoachCard(lines, cx, y, { accent = '#ffd400', alpha = 1, anchor = 'top', step = null } = {}) {
+    const { ctx } = this;
+    const lineH = 24, padX = 16, padY = 9;
+    const runs = lines.map((l) => this.coachRuns(l));
+    const width = Math.max(...runs.map((r) => r.reduce((w, seg) => w + seg.w, 0))) + padX * 2 + (step ? 34 : 0);
+    const height = lines.length * lineH + padY * 2;
+    const x0 = cx - width / 2;
+    const y0 = anchor === 'top' ? y : anchor === 'middle' ? y - height / 2 : y - height;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(8,10,16,0.86)';
+    roundRect(ctx, x0, y0, width, height, 10);
+    ctx.fill();
+    ctx.fillStyle = accent;
+    ctx.fillRect(x0, y0 + 6, 4, height - 12);
+    if (step) {
+      ctx.font = `bold 10px ${MONO}`;
+      ctx.fillStyle = '#8a91a0';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(step, x0 + width - 12, y0 + height / 2);
+    }
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    runs.forEach((segs, li) => {
+      const total = segs.reduce((w, seg) => w + seg.w, 0);
+      let x = cx - total / 2 - (step ? 17 : 0);
+      const cy = y0 + padY + lineH * (li + 0.5);
+      for (const seg of segs) {
+        if (seg.key) {
+          const kw = seg.w - 6, kh = 18;
+          ctx.fillStyle = '#1c2029';
+          roundRect(ctx, x + 3, cy - kh / 2, kw, kh, 5);
+          ctx.fill();
+          ctx.strokeStyle = '#3a4152';
+          ctx.lineWidth = 1;
+          roundRect(ctx, x + 3, cy - kh / 2, kw, kh, 5);
+          ctx.stroke();
+          ctx.fillStyle = '#39404f';
+          ctx.fillRect(x + 4, cy + kh / 2 - 2, kw - 2, 2); // keycap lip
+          ctx.font = `700 11px ${MONO}`;
+          ctx.fillStyle = '#fff';
+          ctx.textAlign = 'center';
+          ctx.fillText(seg.text, x + 3 + kw / 2, cy);
+          ctx.textAlign = 'left';
+        } else {
+          ctx.font = `600 13px ${FONT}`;
+          ctx.fillStyle = seg.sep ? '#6d7482' : '#f4f5f8';
+          ctx.fillText(seg.text, x, cy + 1);
+        }
+        x += seg.w;
+      }
+    });
+    ctx.restore();
+    ctx.textBaseline = 'alphabetic';
+    return height;
+  }
+  /** Splits a coach line into measured runs: plain text, ` · ` separators and `[KEY]` keycaps. */
+  coachRuns(line) {
+    const { ctx } = this;
+    const segs = [];
+    for (const part of line.split(/(\[[^\]]+\]| · )/)) {
+      if (!part) continue;
+      if (part.startsWith('[') && part.endsWith(']')) {
+        const text = part.slice(1, -1);
+        ctx.font = `700 11px ${MONO}`;
+        segs.push({ key: true, text, w: Math.max(22, ctx.measureText(text).width + 14) + 6 });
+      } else {
+        ctx.font = `600 13px ${FONT}`;
+        segs.push({ text: part, sep: part === ' · ', w: ctx.measureText(part).width });
+      }
+    }
+    return segs;
+  }
+  /** Small centred pill for a toast's second line: readable over anything, same family as the HUD chips. */
+  drawPill(text, cx, cy) {
+    const { ctx } = this;
+    ctx.font = `600 13px ${FONT}`;
+    const w = ctx.measureText(text).width + 26;
+    ctx.fillStyle = 'rgba(8,10,16,0.86)';
+    roundRect(ctx, cx - w / 2, cy - 13, w, 26, 13);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, cx, cy + 1);
+    ctx.textBaseline = 'alphabetic';
   }
 
   /** Damage card: front wing and floor bars. Empty bars are good; a full red bar means the next hit retires you. */
