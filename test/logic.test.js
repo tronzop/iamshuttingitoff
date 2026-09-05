@@ -351,3 +351,105 @@ test('safety car pace: lifting goes slower than the cap, bunched rivals hold abo
   assert.ok(SAFETY_CAR.bunchSpread[1] >= 1, 'some rivals pull away rather than fall back into you');
   assert.ok(PLAYER.throttleRange.min < 1);
 });
+
+// ---------------------------------------------------------------------------
+// The garage: cars, liveries and how they change the maths
+// ---------------------------------------------------------------------------
+import { CARS, DEFAULT_CAR, STAT_BARS, carBalance, carById, statBars, carQuirks, teamOfCar } from '../src/cars.js';
+
+test('cars: one per modern team, unique ids, sane multipliers, roughly balanced', () => {
+  const ids = new Set(CARS.map((c) => c.id));
+  assert.equal(ids.size, CARS.length);
+  assert.ok(ids.has(DEFAULT_CAR));
+  const modern = Object.values(TEAMS).filter((t) => !t.classic).map((t) => t.id).sort();
+  assert.deepEqual(CARS.map((c) => c.team).sort(), modern, 'every current team has a car and no classic team does');
+  for (const c of CARS) {
+    assert.ok(TEAMS[c.team] && teamOfCar(c) === TEAMS[c.team], `${c.id} has an unknown team`);
+    assert.ok(c.name && c.tag, `${c.id} needs a name and a tag line`);
+    for (const k of ['speed', 'accel', 'handling', 'tyreWear', 'ers', 'durability', 'pitCrew']) {
+      assert.ok(typeof c[k] === 'number' && c[k] >= 0.8 && c[k] <= 1.35, `${c.id}.${k} = ${c[k]} is out of range`);
+    }
+    // nobody gets a car that is simply better than the rest
+    assert.ok(Math.abs(carBalance(c)) <= 0.07, `${c.id} balance ${carBalance(c).toFixed(3)} is off`);
+    for (const b of STAT_BARS) { const v = statBars(b.value(c)); assert.ok(v >= 1 && v <= 5); }
+    assert.equal(typeof carQuirks(c), 'string');
+  }
+  assert.equal(carById('not-a-car').id, DEFAULT_CAR, 'unknown ids fall back to the default car');
+  assert.equal(statBars(1), 3);
+  assert.equal(statBars(0.8), 1);
+  assert.equal(statBars(1.3), 5);
+});
+
+test('cars: the multipliers reach the maths', () => {
+  const { playerSpeed, wearDelta, judgeWheel, wheelZones, baseSpeed } = logic;
+  const { SPEED, PITGAME } = config;
+  const base = { elapsed: 0, throttle: 1, boosting: false, grip: 1, inPit: false, spun: false };
+  assert.ok(Math.abs(playerSpeed({ ...base, speedMul: 1.06 }) - baseSpeed(0) * 1.06) < 1e-9);
+  assert.equal(playerSpeed({ ...base, inPit: true, speedMul: 1.06 }), SPEED.pitLimit, 'the pit limiter ignores the car');
+  assert.ok(Math.abs(wearDelta('medium', SPEED.base, 1, 0.9) / wearDelta('medium', SPEED.base, 1) - 0.9) < 1e-9);
+  // a quick crew widens both zones; a slow one narrows them
+  assert.equal(wheelZones(false, 1).good, PITGAME.zoneHalf);
+  assert.ok(wheelZones(false, 1.2).good > wheelZones(false, 1).good && wheelZones(false, 0.85).perfect < wheelZones(false, 1).perfect);
+  const edge = 0.5 + PITGAME.zoneHalf * 1.1;
+  assert.equal(judgeWheel(edge, false, 1), 'miss');
+  assert.equal(judgeWheel(edge, false, 1.2), 'good');
+  assert.equal(judgeWheel(0.5, true, 0.85), 'perfect');
+});
+
+test('cars: the world drives the chosen car and its team-mates come from that team', async () => {
+  const { World, rosterFor, pickDriver } = await import('../src/world.js');
+  for (const c of CARS) {
+    const { mates, others } = rosterFor(c.team);
+    assert.equal(mates.length, 2, `${c.team} should have two drivers to pick a team-mate from`);
+    assert.ok(mates.every((d) => d.team === c.team) && others.every((d) => d.team !== c.team && !d.legend));
+    for (let i = 0; i < 20; i++) assert.equal(pickDriver(true, c.team).team, c.team);
+  }
+  const w = new World(() => {}, 'mclaren');
+  assert.equal(w.car.id, 'mclaren');
+  assert.equal(w.team.id, 'mclaren');
+  assert.equal(w.run.car, 'mclaren');
+  const grid = w.hazards.filter((h) => h.type === 'rival');
+  assert.equal(grid.filter((h) => h.teammate).length, 1, 'exactly one team-mate on the grid');
+  assert.ok(grid.every((h) => h.teammate === (h.driver.team === 'mclaren')));
+  assert.ok(grid.every((h) => h.team.teammate === undefined), 'the team-mate flag lives on the hazard, not the team');
+  // a car object works too, and the default is the Ferrari
+  assert.equal(new World(() => {}, carById('haas')).car.id, 'haas');
+  assert.equal(new World(() => {}).car.id, DEFAULT_CAR);
+  // a tough car loses less bodywork per hit
+  const tough = new World(() => {}, 'haas');
+  const fragile = new World(() => {}, 'alpine');
+  tough.hurt('wing', 30, {});
+  fragile.hurt('wing', 30, {});
+  assert.ok(tough.player.parts.wing < 30 && fragile.player.parts.wing > 30);
+});
+
+test('cars: career remembers the teams you raced for; leaderboard entries carry the car', () => {
+  let career = EMPTY_CAREER();
+  for (const id of ['ferrari', 'ferrari', 'mclaren', 'haas', 'sauber', 'alpine']) career = applyRun(career, { ...EMPTY_RUN(), car: id, gps: 1 }, 25);
+  assert.deepEqual(career.cars, ['ferrari', 'mclaren', 'haas', 'sauber', 'alpine']);
+  assert.ok(evaluateTrophies(career, { ...EMPTY_RUN(), car: 'alpine', gps: 1 }).includes('sillyseason'));
+  assert.ok(evaluateTrophies(EMPTY_CAREER(), { ...EMPTY_RUN(), car: 'ferrari', gps: 1 }).includes('tifosi'));
+  assert.ok(!evaluateTrophies(EMPTY_CAREER(), { ...EMPTY_RUN(), car: 'haas', gps: 1 }).includes('tifosi'));
+  // old careers without the field still load
+  assert.deepEqual(applyRun({ ...EMPTY_CAREER(), cars: undefined }, { ...EMPTY_RUN(), car: 'haas' }, 25).cars, ['haas']);
+  assert.equal(sanitize({ score: 10, car: 'mclaren' }).car, 'mclaren');
+  assert.equal(sanitize({ score: 10, car: '<img>' }).car, '');
+  assert.equal(sanitize({ score: 10 }).car, '');
+});
+
+test('livery: red body pixels take the primary, orange details the accent, everything else is left alone', async () => {
+  const { classifyPixel, recolour, hsv } = await import('../src/livery.js');
+  assert.equal(classifyPixel(0xbb, 0x11, 0x11, 255), 'primary'); // the sheet's dominant red
+  assert.equal(classifyPixel(0xff, 0x44, 0x44, 255), 'primary'); // highlight
+  assert.equal(classifyPixel(0xff, 0x8a, 0x00, 255), 'accent'); // wheel rim orange
+  assert.equal(classifyPixel(0xff, 0xd4, 0x00, 255), 'accent'); // badge yellow
+  assert.equal(classifyPixel(0x22, 0x22, 0x33, 255), null); // carbon
+  assert.equal(classifyPixel(0xf4, 0xf4, 0xf4, 255), null); // lettering
+  assert.equal(classifyPixel(0xbb, 0x11, 0x11, 10), null); // transparent
+  // shading is preserved: a darker red gives a darker papaya
+  const light = recolour(0xee, 0x33, 0x33, [0xff, 0x80, 0x00]);
+  const dark = recolour(0x99, 0x11, 0x11, [0xff, 0x80, 0x00]);
+  assert.ok(light[0] > dark[0] && light[1] > dark[1]);
+  assert.ok(light.every((v) => v >= 0 && v <= 255 && Number.isInteger(v)));
+  assert.deepEqual(hsv(255, 0, 0).map((v) => Math.round(v * 100) / 100), [0, 1, 1]);
+});

@@ -1,7 +1,8 @@
 // Canvas renderer. Reads the World and draws the whole scene + HUD.
 // The world is in logical units (height = WORLD.height); `view.scale` maps to device px.
 import { COMPOUNDS, DAMAGE, ERS, PITGAME, PLAYER, SAFETY_CAR_TEAM, SPEED, START, TYRES } from './config.js';
-import { clamp, engineState, formatDistance, formatTime, gpProgress, lerp, positionLabel, sweepPos } from './logic.js';
+import { clamp, engineState, formatDistance, formatTime, gpProgress, lerp, positionLabel, sweepPos, wheelZones } from './logic.js';
+import { drawLivery } from './livery.js';
 
 const FONT = '"Segoe UI", system-ui, Roboto, sans-serif';
 const MONO = '"Cascadia Mono", Consolas, "Roboto Mono", monospace';
@@ -602,13 +603,15 @@ export class Renderer {
     const bottom = world.pitBottom;
     ctx.fillStyle = lerpColor('#4f535c', '#2f323a', world.night);
     ctx.fillRect(0, top, W, bottom - top);
-    // garages scroll along the back of the lane; the Ferrari garage is where the stop happens
+    // garages scroll along the back of the lane; every fourth one is your team's
     const garageW = 260;
     const off = world.scroll % (garageW * 4);
+    const own = world.team ? world.team.primary : '#d40000';
+    const neighbours = ['#0b2a6f', '#c0c0c0', '#ff8a00'].filter((c) => c !== own);
     for (let i = -1; i < W / garageW + 5; i++) {
       const x = i * garageW - off;
       const idx = ((i + Math.floor(world.scroll / (garageW * 4)) * 4) % 4 + 4) % 4;
-      const color = idx === 0 ? '#d40000' : idx === 1 ? '#0b2a6f' : idx === 2 ? '#c0c0c0' : '#ff8a00';
+      const color = idx === 0 ? own : neighbours[(idx - 1) % neighbours.length];
       ctx.fillStyle = color;
       ctx.fillRect(x, top, garageW - 8, 12);
       ctx.fillStyle = lerpColor('#23252b', '#ffe9a8', world.night * 0.8);
@@ -918,11 +921,11 @@ export class Renderer {
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
     roundRect(ctx, bx, by, bw, bh, 4); ctx.fill();
     if (!done) {
-      const half = g.jammed[g.wheel] ? PITGAME.jamZoneHalf : PITGAME.zoneHalf;
+      const z = wheelZones(g.jammed[g.wheel], g.crew ?? 1);
       ctx.fillStyle = 'rgba(46,204,113,0.55)';
-      ctx.fillRect(bx + bw * (0.5 - half), by, bw * half * 2, bh);
+      ctx.fillRect(bx + bw * (0.5 - z.good), by, bw * z.good * 2, bh);
       ctx.fillStyle = 'rgba(125,249,255,0.9)';
-      ctx.fillRect(bx + bw * (0.5 - PITGAME.perfectHalf), by, bw * PITGAME.perfectHalf * 2, bh);
+      ctx.fillRect(bx + bw * (0.5 - z.perfect), by, bw * z.perfect * 2, bh);
       if (g.hold <= 0) {
         const pos = sweepPos(g.t);
         ctx.fillStyle = '#fff';
@@ -1092,6 +1095,7 @@ export class Renderer {
     const { ctx } = this;
     const p = world.player;
     const { sheet, frames } = this.assets;
+    const car = world.car;
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(p.tilt + p.angle);
@@ -1101,16 +1105,8 @@ export class Renderer {
     ctx.beginPath();
     ctx.ellipse(0, PLAYER.height * 0.45, PLAYER.width * 0.48, 8, 0, 0, Math.PI * 2);
     ctx.fill();
-    if (sheet && sheet.complete && sheet.naturalWidth) {
-      const fw = sheet.naturalWidth;
-      const fh = sheet.naturalHeight / frames;
-      const fi = Math.floor(p.frame) % frames;
-      ctx.scale(-1, 1); // sprite faces left; we drive right
-      ctx.drawImage(sheet, 0, fi * fh, fw, fh, -PLAYER.width / 2, -PLAYER.height / 2, PLAYER.width, PLAYER.height);
-      ctx.scale(-1, 1);
-    } else {
-      drawVectorCar(ctx, PLAYER.width, PLAYER.height, { primary: '#e10600', accent: '#fff' }, p.frame);
-    }
+    // the sprite sheet recoloured to the team you drive for (the vector car until it has loaded)
+    drawLivery(ctx, sheet, frames, car, PLAYER.width, PLAYER.height, p.frame);
     // brake light when lifting (the FIA rain light doubles as one)
     if (p.throttle < 0.95 || world.rain > 0.3) {
       const on = world.rain > 0.3 ? Math.sin(this.time * 12) > 0 : true;
@@ -1200,11 +1196,11 @@ export class Renderer {
         ctx.ellipse(0, hz.h * 0.45, hz.w * 0.48, 7, 0, 0, Math.PI * 2);
         ctx.fill();
         drawVectorCar(ctx, hz.w, hz.h, hz.team, hz.frame, { brake: hz.brake > 0, driver: hz.driver });
-        if (hz.team.teammate || hz.driver?.legend) {
+        if (hz.teammate || hz.driver?.legend) {
           ctx.fillStyle = hz.driver?.legend ? '#d4af37' : '#fff';
           ctx.font = `bold 11px ${FONT}`;
           ctx.textAlign = 'center';
-          ctx.fillText(hz.team.teammate ? `TEAM-MATE · ${hz.driver.short}` : `${hz.driver.name.toUpperCase()} · ${hz.team.classic}`, 0, -hz.h * 0.75);
+          ctx.fillText(hz.teammate ? `TEAM-MATE · ${hz.driver.short}` : `${hz.driver.name.toUpperCase()} · ${hz.team.classic}`, 0, -hz.h * 0.75);
         }
         // tow indicator when you are in this car's slipstream
         if (world.towRival === hz && world.tow > 0.15) {

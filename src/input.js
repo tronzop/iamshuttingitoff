@@ -22,6 +22,9 @@ export class Input {
       if (e.repeat) return;
       // one-shot "fire" for the pit-stop mini-game (boost keys double up as the wheel gun)
       if (k === 'boost' || e.code === 'KeyB') this.emit('action');
+      // left / right also step through menus (the car picker on the title screen)
+      if (k === 'left') this.emit('nav', -1);
+      if (k === 'right') this.emit('nav', 1);
       switch (e.code) {
         case 'KeyP': case 'Escape': this.emit('pause'); break;
         case 'Enter': this.emit('confirm'); break;

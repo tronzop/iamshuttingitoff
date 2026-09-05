@@ -1,5 +1,5 @@
 // Bootstrap: wires input, world, renderer, audio and the DOM screens together.
-import { COMPOUNDS, COMPOUND_ORDER, DAMAGE, ERS, GP, SPEED, TYRES, VENUES, WORLD } from './config.js';
+import { COMPOUNDS, COMPOUND_ORDER, DAMAGE, ERS, GP, SPEED, STORAGE_KEYS, TYRES, VENUES, WORLD } from './config.js';
 import { Input } from './input.js';
 import { World } from './world.js';
 import { Renderer } from './render.js';
@@ -8,6 +8,8 @@ import { radioLine } from './radio.js';
 import { Leaderboard } from './leaderboard.js';
 import { Career, TROPHIES } from './career.js';
 import { DRIVERS, OPTIONAL_CLIPS, clipLine, resolveClip } from './grid.js';
+import { CARS, STAT_BARS, carById, carQuirks, statBars, teamOfCar } from './cars.js';
+import { drawLivery } from './livery.js';
 import { clamp, formatDistance, lerp, positionLabel } from './logic.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -38,11 +40,13 @@ const assetsAvailable = fetch('/api/assets', { cache: 'no-store' }).then((r) => 
   .then((a) => a && Array.isArray(a.clips) ? { engine: [], ...a } : { clips: [], drivers: [], engine: [] });
 audio.setAvailable(assetsAvailable);
 const renderer = new Renderer(canvas, assets);
+// The car you drive: remembered between visits, chosen on the title screen.
+let car = carById((() => { try { return localStorage.getItem(STORAGE_KEYS.car); } catch { return null; } })());
 let career = Career.load();
 const hud = { radio: null, toast: null, damage: null, best: Leaderboard.best(), musicOn: audio.musicOn, points: career.points };
 
 let state = 'title'; // title | playing | paused | over
-let world = new World(onWorldEvent);
+let world = new World(onWorldEvent, car);
 let last = performance.now();
 let submitted = false;
 
@@ -59,7 +63,7 @@ function show(name) {
 }
 function startGame() {
   audio.init();
-  world = new World(onWorldEvent);
+  world = new World(onWorldEvent, car);
   fit();
   world.reset();
   fit();
@@ -78,6 +82,7 @@ function startGame() {
 function pause() {
   if (state !== 'playing') return;
   state = 'paused';
+  $('#pauseLine').textContent = `Race suspended. ${world.car.name} · ${world.venue.name} · ${positionLabel(world.overtakes)}`;
   show('pause');
   audio.suspend();
 }
@@ -125,6 +130,7 @@ function gameOver(payload = {}) {
   // fill the panel
   $('#finalScore').textContent = String(world.score);
   $('#finalStats').innerHTML = [
+    ['Car', world.car.name],
     ['Distance', formatDistance(world.distance)],
     ['Grands Prix', `${world.gps} (+${world.gps * GP.points} pts)`],
     ['Overtakes', world.overtakes],
@@ -376,6 +382,7 @@ function syncBoxButton() {
   boxBtn.querySelector('b').textContent = label;
   boxBtn.querySelector('span').textContent = sub;
 }
+input.on('nav', (dir) => { if (state === 'title') selectCar(CARS[(CARS.indexOf(car) + dir + CARS.length) % CARS.length].id); });
 input.on('music', () => { audio.init(); hud.musicOn = audio.toggleMusic(); syncToggles(); });
 input.on('sfx', () => { audio.init(); audio.toggleSfx(); syncToggles(); });
 input.on('compound', (i) => { if (state === 'playing') world.setNextCompound(COMPOUND_ORDER[i]); });
@@ -400,6 +407,50 @@ function syncToggles() {
 }
 syncToggles();
 $('#titleBest').textContent = hud.best ? `Personal best: ${hud.best}` : '';
+
+// ---------- the garage: pick your car ----------
+const carList = $('#carList');
+const BAR_SHORT = { speed: 'SPD', accel: 'LAU', handling: 'HDL', tyres: 'TYR', ers: 'ERS' };
+carList.innerHTML = CARS.map((c) => `<button type="button" class="car" role="option" data-car="${c.id}" aria-selected="false" style="--team:${teamOfCar(c).primary}" title="${escapeHtml(c.tag)}">
+  <canvas width="300" height="92" aria-hidden="true"></canvas><b>${escapeHtml(c.name)}</b>
+  <span class="bars">${STAT_BARS.map((b) => { const v = statBars(b.value(c)); return `<small title="${b.label} ${v}/5">${BAR_SHORT[b.key]}</small><i style="--v:${v}"></i>`; }).join('')}</span>
+</button>`).join('');
+for (const btn of carList.querySelectorAll('[data-car]')) btn.addEventListener('click', () => selectCar(btn.dataset.car));
+// the global key handler ignores keys typed on buttons, so a focused card steps through the garage itself
+carList.addEventListener('keydown', (e) => {
+  const dir = e.code === 'ArrowLeft' || e.code === 'KeyA' ? -1 : e.code === 'ArrowRight' || e.code === 'KeyD' ? 1 : 0;
+  if (!dir) return;
+  e.preventDefault();
+  selectCar(CARS[(CARS.indexOf(car) + dir + CARS.length) % CARS.length].id);
+});
+/** Paints every card's thumbnail in its livery (the vector car until the sprite sheet has loaded, then again with it). */
+function drawCarThumbs() {
+  for (const btn of carList.querySelectorAll('[data-car]')) {
+    const c = carById(btn.dataset.car);
+    const cv = btn.querySelector('canvas');
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.translate(cv.width / 2, cv.height / 2 + 4);
+    drawLivery(ctx, assets.sheet, assets.frames, c, 280, 86, 0);
+  }
+}
+function selectCar(id) {
+  const next = carById(id);
+  const changed = next !== car;
+  car = next;
+  try { localStorage.setItem(STORAGE_KEYS.car, car.id); } catch { /* ignore */ }
+  for (const btn of carList.querySelectorAll('[data-car]')) {
+    const on = btn.dataset.car === car.id;
+    btn.setAttribute('aria-selected', String(on));
+    if (on) btn.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: changed ? 'smooth' : 'instant' });
+  }
+  const quirks = carQuirks(car);
+  $('#carTag').textContent = `${car.name} — ${car.tag}${quirks ? ` (${quirks})` : ''}`;
+  if (changed && state === 'title') demoWorld = newDemoWorld(); // the attract mode drives your car
+}
+drawCarThumbs();
+assets.sheet.addEventListener('load', drawCarThumbs);
 
 // ---------- career / trophy cabinet ----------
 function renderCareer() {
@@ -433,7 +484,7 @@ $('#scoreForm').addEventListener('submit', async (e) => {
   $('#submitScore').disabled = true;
   $('#submitStatus').textContent = 'Sending…';
   const { online } = await Leaderboard.submit({
-    name: $('#nameInput').value, score: world.score, distance: world.distance, overtakes: world.overtakes, stops: world.pit.stops,
+    name: $('#nameInput').value, score: world.score, distance: world.distance, overtakes: world.overtakes, stops: world.pit.stops, car: world.car.id,
   });
   $('#submitStatus').textContent = online ? 'Saved to the global leaderboard.' : 'Saved locally (no server reachable).';
   refreshLeaderboard();
@@ -444,7 +495,11 @@ async function refreshLeaderboard() {
   const { entries, source } = await Leaderboard.fetch();
   $('#leaderboardSource').textContent = source === 'server' ? 'global' : 'this browser';
   list.innerHTML = entries.length
-    ? entries.map((e, i) => `<li><span class="pos">${i + 1}</span><span class="name">${escapeHtml(e.name)}</span><span class="score">${e.score}</span></li>`).join('')
+    ? entries.map((e, i) => {
+      const c = e.car ? CARS.find((x) => x.id === e.car) : null;
+      const swatch = c ? `<span class="swatch" style="background:${teamOfCar(c).primary}" title="${escapeHtml(c.name)}"></span>` : '<span class="swatch none"></span>';
+      return `<li><span class="pos">${i + 1}</span>${swatch}<span class="name">${escapeHtml(e.name)}</span><span class="score">${e.score}</span></li>`;
+    }).join('')
     : '<li class="empty">No times set yet. Rawe ceek starts now.</li>';
 }
 function escapeHtml(s) {
@@ -455,14 +510,15 @@ function escapeHtml(s) {
 refreshLeaderboard();
 
 // ---------- main loop ----------
-/** Attract-mode world, laid out for the real view size so the grid lines up. */
+/** Attract-mode world, laid out for the real view size so the grid lines up; it drives the car you have picked. */
 function newDemoWorld() {
-  const w = new World(() => {});
+  const w = new World(() => {}, car);
   w.resize(renderer.view.width, renderer.view.height);
   w.reset();
   return w;
 }
 let demoWorld = newDemoWorld();
+selectCar(car.id); // highlight the remembered car now that everything it touches exists
 const demoInput = { up: false, down: false, left: false, right: false, boost: false, pointerY: null };
 
 function frame(now) {
@@ -525,4 +581,4 @@ requestAnimationFrame((t) => { last = t; frame(t); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'playing') pause(); });
 
 // Debug hook (used by the smoke test): window.raweCeek.world etc.
-window.raweCeek = { get world() { return world; }, get state() { return state; }, startGame, pause, resume };
+window.raweCeek = { get world() { return world; }, get state() { return state; }, get car() { return car; }, startGame, pause, resume, selectCar };

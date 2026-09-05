@@ -31,17 +31,17 @@ export function gripFactor(compoundId, wear, rain) {
   return g;
 }
 
-/** Wear added over dt seconds at a given speed. */
-export function wearDelta(compoundId, speed, dt) {
+/** Wear added over dt seconds at a given speed; `wearMul` is the car's tyre-wear multiplier. */
+export function wearDelta(compoundId, speed, dt, wearMul = 1) {
   const c = COMPOUNDS[compoundId];
   const ratio = speed / SPEED.base;
-  return ratio * ratio * c.wearRate * TYRES.wearPerSecond * dt;
+  return ratio * ratio * c.wearRate * TYRES.wearPerSecond * wearMul * dt;
 }
 
-/** Player scroll speed given the current state. */
-export function playerSpeed({ elapsed, throttle, boosting, grip, inPit, spun }) {
+/** Player scroll speed given the current state; `speedMul` is the car's top-speed multiplier. */
+export function playerSpeed({ elapsed, throttle, boosting, grip, inPit, spun, speedMul = 1 }) {
   if (inPit) return SPEED.pitLimit;
-  let v = baseSpeed(elapsed) * throttle;
+  let v = baseSpeed(elapsed) * throttle * speedMul;
   // low grip caps how much of the throttle you can actually use
   v *= lerp(0.55, 1, clamp(grip, 0, 1));
   if (boosting) v *= ERS.boostMultiplier;
@@ -161,11 +161,16 @@ export function sweepPos(t) {
   const x = (t * PITGAME.sweepSpeed) % 2;
   return x <= 1 ? x : 2 - x;
 }
+/** Half-widths of the good and perfect zones for a wheel; `crew` is the car's pit-crew multiplier. */
+export function wheelZones(jammed = false, crew = 1) {
+  return { good: (jammed ? PITGAME.jamZoneHalf : PITGAME.zoneHalf) * crew, perfect: PITGAME.perfectHalf * crew };
+}
 /** Judges a wheel-gun press at marker position `pos` (0..1). */
-export function judgeWheel(pos, jammed = false) {
+export function judgeWheel(pos, jammed = false, crew = 1) {
   const d = Math.abs(pos - 0.5);
-  if (d <= PITGAME.perfectHalf) return 'perfect';
-  if (d <= (jammed ? PITGAME.jamZoneHalf : PITGAME.zoneHalf)) return 'good';
+  const z = wheelZones(jammed, crew);
+  if (d <= z.perfect) return 'perfect';
+  if (d <= z.good) return 'good';
   return 'miss';
 }
 /** Total stationary time for a list of wheel results ('perfect' | 'good' | 'miss'). */

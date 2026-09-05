@@ -4,7 +4,7 @@
 
 | File | Used for |
 | --- | --- |
-| `ferrari_sheet.png` | 8-frame side-view sprite sheet of the player car (512 × 156 per frame) |
+| `ferrari_sheet.png` | 8-frame side-view sprite sheet of the player car (512 × 156 per frame). Other teams' liveries are palette swaps of it, built at runtime by `src/livery.js` (reds → team primary, orange/yellow → accent) |
 | `sadgreg.png`, `retire_max_kick.jpg` | Retirement-screen pictures after a crash (one is picked at random) |
 | `celebrate_seb_bow.jpg`, `celebrate_alonso_fly.jpg`, `celebrate_seb_p2.jpg` | Retirement-screen pictures when the run set a new personal best (one is picked at random) |
 | `favicon.png` | Tab icon |

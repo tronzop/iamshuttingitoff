@@ -23,17 +23,19 @@ export const TROPHIES = [
   { id: 'subtwo', name: 'Sub-two', desc: 'A pit stop under 2.0 seconds. Not a Ferrari thing.', check: (c, r) => r.recordStops >= 1 },
   { id: 'pitcrew', name: 'Pit crew of the year', desc: 'Four perfect wheel guns in one stop.', check: (c, r) => r.perfectStops >= 1 },
   { id: 'marathon', name: 'Rawe Ceek every week', desc: 'Drive 50 km over your career.', check: (c) => c.metres >= 50000 },
+  { id: 'sillyseason', name: 'Silly season', desc: 'Race for five different teams.', check: (c) => (c.cars || []).length >= 5 },
+  { id: 'tifosi', name: 'Tifosi', desc: 'Complete a Grand Prix in the Ferrari.', check: (c, r) => r.gps >= 1 && r.car === 'ferrari' },
 ];
 
 export const EMPTY_CAREER = () => ({
-  races: 0, metres: 0, overtakes: 0, gps: 0, points: 0, slowStops: 0, penalties: 0, trophies: [],
+  races: 0, metres: 0, overtakes: 0, gps: 0, points: 0, slowStops: 0, penalties: 0, trophies: [], cars: [],
 });
 
 /** Fresh per-run counters the world fills in. */
 export const EMPTY_RUN = () => ({
   gps: 0, pushes: 0, punctures: 0, stops: 0, slowStops: 0, rainTime: 0, nightTime: 0, scClean: 0, scPeriods: 0,
   penalties: 0, teammatePasses: 0, legendPasses: 0, towEnergy: 0, overtakes: 0, score: 0, metres: 0,
-  recordStops: 0, cleanStops: 0, perfectStops: 0, contacts: 0, repairs: 0, greatStarts: 0,
+  recordStops: 0, cleanStops: 0, perfectStops: 0, contacts: 0, repairs: 0, greatStarts: 0, car: '',
 });
 
 const load = () => {
@@ -52,6 +54,7 @@ export function applyRun(career, run, gpPoints) {
     points: career.points + run.gps * gpPoints,
     slowStops: career.slowStops + run.slowStops,
     penalties: career.penalties + run.penalties,
+    cars: run.car ? [...new Set([...(career.cars || []), run.car])] : career.cars || [],
   };
 }
 

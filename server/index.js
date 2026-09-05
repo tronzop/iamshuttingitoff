@@ -45,6 +45,7 @@ export function sanitize(e) {
     distance: Math.max(0, Math.floor(Number(e.distance) || 0)),
     overtakes: Math.max(0, Math.floor(Number(e.overtakes) || 0)),
     stops: Math.max(0, Math.floor(Number(e.stops) || 0)),
+    car: /^[a-z0-9]{1,16}$/.test(String(e.car || '')) ? String(e.car) : '',
     timestamp: Date.now(),
   };
 }

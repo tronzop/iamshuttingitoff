@@ -2,7 +2,7 @@
 
 A Ferrari-fan survival racer in plain HTML5 Canvas + JavaScript. No build step, no runtime dependencies.
 
-You are the red car. The track scrolls under you at ever-increasing speed through a fourteen-round calendar — Monza to Bahrain, three of them under floodlights. Dodge Pirelli tyres, rival cars, oil and debris; ride the slipstream; manage your tyre wear and temperature; behave behind the safety car (the field bunches to its pace — lift to drop back, and you get a moment's grace after the yellow); box in the pit window when the wall lets you; and trust the strategy. (Don't.)
+You are the red car — or the papaya one, or the silver one: pick any of the ten current teams' liveries on the title screen, each with its own handling. The track scrolls under you at ever-increasing speed through a fourteen-round calendar — Monza to Bahrain, three of them under floodlights. Dodge Pirelli tyres, rival cars, oil and debris; ride the slipstream; manage your tyre wear and temperature; behave behind the safety car (the field bunches to its pace — lift to drop back, and you get a moment's grace after the yellow); box in the pit window when the wall lets you; and trust the strategy. (Don't.)
 
 ## Play
 
@@ -23,10 +23,12 @@ Or open `index.html` straight from disk — everything works offline except the 
 | `1`–`5` / `Tab` | Choose the compound for your next stop (Soft / Medium / Hard / Inter / Wet) |
 | `B` / **BOX BOX** button | Box this lap — the car steers itself into the pits when the window is open (steering `▲` into the green gap still works) |
 | `P` / `Esc` | Pause · `R` restart · `M` music · `N` sound effects · `T` switch soundtrack |
+| `◀ ▶` (title screen) | Choose your car |
 | Touch / mouse | Drag to steer; press on the right quarter of the screen to boost |
 
 ### How it works
 
+- **Your car**: the garage on the title screen has one car per current team — Ferrari, McLaren, Red Bull, Mercedes, Aston Martin, Alpine, Williams, Racing Bulls, Haas and Kick Sauber — in an approximation of its colours. Each has five rated stats (top speed, launch, handling, tyre life, battery) and quirks the bars do not show: some are tough or fragile, some have a quick pit crew, the Ferrari's wheel guns jam. The stats are multipliers on the tunables in `config.js` and the test suite keeps them roughly balanced, so a choice is a trade-off rather than an upgrade. The car is remembered between visits, the attract mode drives it, the leaderboard shows a swatch of it next to your name, and the other car in your colours is your **team-mate**. Add or tune cars in `src/cars.js`.
 - **The start**: you line up P20 at the back of a staggered grid of twelve. Five red lights come on one by one, hold, and go out — hit push or boost within a third of a second for a **+50 great start** (going before they are out is a jump start: no penalty, no bonus). Everyone launches at their own rate; passes in the pack pay +30. For the first ten seconds nothing else spawns and contact costs bodywork, not the race.
 - **Damage**: the car has two damageable parts, shown on the damage meter. The **front wing** takes debris and nose-to-tail contact and costs top speed; the **floor** takes side-by-side rubs (or a car into your rear) and costs grip. A gentle touch is survivable — you lose momentum and the other car gets punted on — but a hard frontal hit outside the launch, or any hit on a part already at 100 %, is a **crash** and the race is over. A rolling tyre or a stranded car is always a crash. The pit crew fits a new nose and floor with the tyres, and the wall calls you in from 30 % damage.
 - **Oil** spins you and adds wear.
@@ -38,12 +40,12 @@ Or open `index.html` straight from disk — everything works offline except the 
 - **Safety car**: a car is stranded somewhere ahead, the field bunches up, marshals wave yellows and a speed delta applies. Overtaking under the SC is a **5 s penalty** (you crawl and score nothing while you serve it). Restart clean and you bank +50; overtakes pay double for the next 4 s.
 - **Grand Prix calendar**: every 1.5 km is a race. Cross the line for +150 and 25 championship points, then a round card slides in and the next venue wipes across the backdrop: Monza, Monaco, Zandvoort, Silverstone, Spa, Baku, Suzuka, Singapore (night), Austin, Mexico City, Interlagos, Las Vegas (night), Melbourne, Bahrain (night). Each venue has its own skyline, sky, grass, barrier and asphalt palette and rain probability — Spa is soaked, Bahrain never rains.
 - **The grid**: rivals are real drivers — the full 2025 field with team liveries, race numbers and their own helmet colours — plus **legends** in classic liveries (Senna's JPS Lotus, Schumacher's Benetton, Button's Brawn, Mansell's Williams, Räikkönen's Lotus, Alonso's Minardi…). Legends are rarer and worth +40. Each driver has their own pit-wall quips when you pass or nearly hit them (Alonso's GP2 engine, Kimi's *bwoah*, Yuki's *WHAT?!*). Add drivers in `src/grid.js`.
-- **Team-mate**: one rival in seven is the other Ferrari (Leclerc or Hamilton). Passing him is +160 and a *Multi 21* radio message; a close call with him is worth more too.
+- **Team-mate**: one rival in seven is the other car from your team (Leclerc or Hamilton if you drive the Ferrari, Norris or Piastri in the McLaren, and so on). Passing him is +160 and a *Multi 21* radio message; a close call with him is worth more too.
 - **Meme pack**: 22 radio moments are wired to events — Bwoah, GP2 engine, Multi 21, Simply lovely, WHAT?!… The repo ships each as a synthesised pit-wall reading run through a team-radio filter; drop the genuine clip into `assets/clips/` with the same name (`bwoah.mp3`) and it takes over. Driver portraits in `assets/drivers/` replace sad Greg with the driver you hit. See `assets/README.md` and the title screen's *Meme pack* panel.
 - **Boxing**: press `B` and the car is ghosted — nothing can hit it — while the world drops into slow motion and it peels off into the pit lane for the wheel-gun mini-game.
 - **Weather**: heavy rain brings lightning and standing water. Fresh tyres out of the pits are cold for a few seconds — weave and take it easy.
 - **Score** = metres travelled + 60 per overtake + 25 per close call + bonuses. Every kilometre and every sustained push gets a radio message from the pit wall.
-- **Career**: championship points, distance and an 18-trophy cabinet persist in this browser (title screen → Trophy cabinet).
+- **Career**: championship points, distance, the teams you have raced for and a 22-trophy cabinet persist in this browser (title screen → Trophy cabinet).
 
 ### Sounds
 
@@ -63,6 +65,8 @@ src/
   input.js          keyboard + pointer
   radio.js          pit-wall lines
   mariachi.js       the mariachi soundtrack: sequencer data + trumpet/guitarrón/vihuela synths
+  cars.js           the garage: one car per team, stats, balance weights (tested)
+  livery.js         palette-swaps the Ferrari sprite sheet into each team's colours
   career.js         persistent career stats + trophy definitions (tested)
   leaderboard.js    localStorage + server API client
   style.css
@@ -70,6 +74,8 @@ server/index.js     zero-dependency static + leaderboard server
 test/               node:test unit tests (`npm test`)
 assets/             sprite sheet, sad Greg, meme clips
 ```
+
+Rawe Ceek is an unofficial fan game. Team and driver names identify which real cars the colours are inspired by and nothing more: there are no logos or sponsor marks, the liveries are approximations, and nothing here is endorsed by or affiliated with Formula 1, the teams or the drivers.
 
 ## Deploy
 
@@ -81,7 +87,7 @@ docker compose up -d --build      # game on http://localhost:3732, scores persis
 
 ## Tuning
 
-Everything that changes how the game feels — speeds, wear rates, pit timing, rain frequency, hazard weights, the venue calendar, safety-car odds, slipstream strength — is in `src/config.js`. `npm test` checks the maths in `src/logic.js` still holds after you fiddle.
+Everything that changes how the game feels — speeds, wear rates, pit timing, rain frequency, hazard weights, the venue calendar, safety-car odds, slipstream strength — is in `src/config.js`. Per-car differences are multipliers in `src/cars.js`; `carBalance` there scores a car's overall strength and the tests fail if one drifts more than ±0.07 from the pack. `npm test` checks the maths in `src/logic.js` still holds after you fiddle.
 
 ## Unraid / auto-updating container
 

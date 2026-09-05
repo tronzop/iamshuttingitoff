@@ -117,6 +117,7 @@ export const STORAGE_KEYS = {
   music: 'rawe-ceek:music',
   sfx: 'rawe-ceek:sfx',
   track: 'rawe-ceek:track',
+  car: 'rawe-ceek:car',
 };
 
 // ---------------------------------------------------------------------------
@@ -183,9 +184,8 @@ export const TYRE_TEMP = {
 };
 
 export const TEAMMATE = {
-  chance: 0.14, // share of rivals that are your team-mate
+  chance: 0.14, // share of rivals that are your team-mate (the other car from the team you drive for)
   bonus: 100, // extra for passing him (the wall will not be happy)
-  team: { name: 'Ferrari', primary: '#e10600', accent: '#ffd400', teammate: true },
 };
 
 export const RIVAL_AI = {

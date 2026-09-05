@@ -12,23 +12,32 @@ import {
 } from './logic.js';
 import { EMPTY_RUN } from './career.js';
 import { DRIVERS, LEGEND_BONUS, LEGEND_CHANCE, TEAMS, teamOf } from './grid.js';
+import { carById, DEFAULT_CAR } from './cars.js';
 
-const MODERN = DRIVERS.filter((d) => !d.legend && d.team !== 'ferrari');
 const LEGENDS = DRIVERS.filter((d) => d.legend);
-const FERRARI = DRIVERS.filter((d) => d.team === 'ferrari');
-/** Picks a rival driver: your team-mate, a legend, or somebody from the current grid. */
-export function pickDriver(teammate) {
-  if (teammate) return pick(FERRARI);
-  return pick(Math.random() < LEGEND_CHANCE ? LEGENDS : MODERN);
+/** The current grid split by the team you drive for: its drivers are your team-mates, the rest are rivals. */
+export function rosterFor(teamId) {
+  return {
+    mates: DRIVERS.filter((d) => !d.legend && d.team === teamId),
+    others: DRIVERS.filter((d) => !d.legend && d.team !== teamId),
+  };
+}
+/** Picks a rival driver: your team-mate, a legend, or somebody from the rest of the grid. */
+export function pickDriver(teammate, teamId = DEFAULT_CAR) {
+  const { mates, others } = rosterFor(teamId);
+  if (teammate) return pick(mates);
+  return pick(Math.random() < LEGEND_CHANCE ? LEGENDS : others);
 }
 
 let nextId = 1;
 
 export class World {
-  constructor(emit) {
+  /** `car` is an entry from cars.js (or its id); it decides the livery, the handling and who your team-mate is. */
+  constructor(emit, car = DEFAULT_CAR) {
     this.emit = emit || (() => {});
     this.width = 1280;
     this.height = WORLD.height;
+    this.car = typeof car === 'string' ? carById(car) : car;
     this.reset();
   }
 
@@ -108,6 +117,7 @@ export class World {
     this.radioLog = [];
     this.stats = { maxSpeed: 0 };
     this.run = EMPTY_RUN();
+    this.run.car = this.car.id;
     this.placeGrid();
   }
 
@@ -120,15 +130,16 @@ export class World {
     p.y = lanes[1];
     this.start.slots = [{ x: p.x, y: p.y }];
     // everyone on the current grid once, your team-mate somewhere in the pack
-    const field = [...MODERN].sort(() => Math.random() - 0.5).slice(0, START.gridCars - 1);
-    field.splice(Math.floor(rand(1, START.gridCars - 1)), 0, pick(FERRARI));
+    const { mates, others } = rosterFor(this.car.team);
+    const field = [...others].sort(() => Math.random() - 0.5).slice(0, START.gridCars - 1);
+    field.splice(Math.floor(rand(1, START.gridCars - 1)), 0, pick(mates));
     field.forEach((driver, i) => {
       const slot = i + 1;
       const x = p.x + slot * START.spacing;
       const y = lanes[(slot + 1) % 2] + rand(-5, 5); // staggered: the car directly ahead of you is two slots up
       this.start.slots.push({ x, y });
       this.hazards.push({
-        id: nextId++, type: 'rival', x, y, w, h, rel: 0, vy: 0, scPace: 0, team: teamOf(driver), driver,
+        id: nextId++, type: 'rival', x, y, w, h, rel: 0, vy: 0, scPace: 0, team: teamOf(driver), driver, teammate: driver.team === this.car.team,
         fromBehind: false, weave: false, weavePhase: rand(0, 6.28), passed: false, frame: 0, defend: false, brake: 0,
         grid: true, v: 0, // absolute speed while the field launches
       });
@@ -136,6 +147,8 @@ export class World {
   }
 
   // ----- public read helpers -----
+  /** The team whose colours you race in. */
+  get team() { return TEAMS[this.car.team]; }
   get venue() { return VENUES[this.venueIndex]; }
   get prevVenue() { return VENUES[this.venuePrev]; }
   get grip() { return gripFactor(this.tyre.compound, this.tyre.wear, this.rain) * tempGrip(this.tyre.temp) * damageEffects(this.player.parts).gripMul; }
@@ -169,7 +182,7 @@ export class World {
   pitAction() {
     const g = this.pit.game;
     if (!g || this.pit.phase !== 'stop' || g.wheel >= PITGAME.wheels.length || g.hold > 0) return null;
-    return this.resolveWheel(judgeWheel(sweepPos(g.t), g.jammed[g.wheel]), false);
+    return this.resolveWheel(judgeWheel(sweepPos(g.t), g.jammed[g.wheel], this.car.pitCrew), false);
   }
   resolveWheel(result, timedOut) {
     const g = this.pit.game;
@@ -384,7 +397,7 @@ export class World {
     const w = PLAYER.width * 0.92;
     const h = PLAYER.height * 0.92;
     const y = Math.random() < 0.5 ? this.trackTop + h : this.trackBottom - h;
-    const driver = pickDriver(false);
+    const driver = pickDriver(false, this.car.team);
     this.hazards.push({
       id: nextId++, type: 'stranded', x: this.width + 700, y, w, h, rel: 0, vy: 0, team: teamOf(driver), driver, angle: rand(-0.5, 0.5),
       frame: 0, smoke: 0,
@@ -454,9 +467,10 @@ export class World {
           pit.phase = 'stop';
           pit.slow = false;
           // the mini-game: four wheels, one at a time, fire the gun in the zone
+          // a slow crew jams the gun more often; the zone width follows the car's pit crew too (see logic.wheelZones)
           pit.game = {
-            wheel: 0, t: 0, results: [], flash: 0, lastResult: null, total: 0, hold: 0,
-            jammed: PITGAME.wheels.map(() => Math.random() < PITGAME.jamChance),
+            wheel: 0, t: 0, results: [], flash: 0, lastResult: null, total: 0, hold: 0, crew: this.car.pitCrew,
+            jammed: PITGAME.wheels.map(() => Math.random() < PITGAME.jamChance * (2 - this.car.pitCrew)),
           };
           this.emit('pitStop', { game: true });
         }
@@ -560,7 +574,7 @@ export class World {
         if (t > this.tow) { this.tow = t; this.towRival = hz; }
       }
       if (this.tow > 0) {
-        const harvest = this.tow * SLIPSTREAM.ersPerSecond * dt;
+        const harvest = this.tow * SLIPSTREAM.ersPerSecond * this.car.ers * dt;
         this.ers.charge = Math.min(ERS.max, this.ers.charge + harvest);
         this.run.towEnergy += harvest;
         if (!this.towAnnounced && this.tow > 0.6) { this.towAnnounced = true; this.emit('tow'); }
@@ -578,7 +592,7 @@ export class World {
       if (this.ers.charge === 0) this.ers.boosting = false;
     } else {
       this.ers.boosting = false;
-      this.ers.charge = Math.min(ERS.max, this.ers.charge + ERS.rechargePerSecond * dt);
+      this.ers.charge = Math.min(ERS.max, this.ers.charge + ERS.rechargePerSecond * this.car.ers * dt);
     }
 
     // spin from oil
@@ -592,7 +606,7 @@ export class World {
     const stopped = inPit && this.pit.phase === 'stop';
     let target = stopped
       ? 0
-      : playerSpeed({ elapsed: this.elapsed, throttle: p.throttle, boosting: this.ers.boosting, grip, inPit, spun: p.spin > 0 });
+      : playerSpeed({ elapsed: this.elapsed, throttle: p.throttle, boosting: this.ers.boosting, grip, inPit, spun: p.spin > 0, speedMul: this.car.speed });
     if (!inPit) target *= 1 + this.tow * SLIPSTREAM.speedBonus;
     if (this.sc.active && !inPit) {
       // capped at safety-car pace; lifting takes you below it so you can drop back from the car ahead
@@ -601,7 +615,7 @@ export class World {
     }
     if (this.penalty > 0 && !inPit) target = Math.min(target, baseSpeed(this.elapsed) * SAFETY_CAR.penaltyCap);
     if (!this.racing) target = 0; // lights are on
-    const accel = target > this.speed ? (this.start.launch > 0 ? START.launchAccel : 2.5) : 4.5;
+    const accel = target > this.speed ? (this.start.launch > 0 ? START.launchAccel : 2.5) * this.car.accel : 4.5;
     this.speed += (target - this.speed) * Math.min(1, dt * accel);
 
     // vertical movement (grip-limited) — pointer overrides keys when active
@@ -616,7 +630,7 @@ export class World {
         dir = Math.abs(dy) < 6 ? 0 : Math.sign(dy);
       }
       if (p.spin > 0) dir *= 0.3;
-      const vmax = PLAYER.verticalSpeed * lerp(0.5, 1, clamp(grip, 0, 1));
+      const vmax = PLAYER.verticalSpeed * this.car.handling * lerp(0.5, 1, clamp(grip, 0, 1));
       const targetVy = dir * vmax;
       p.vy += (targetVy - p.vy) * Math.min(1, dt * 10);
       p.y += p.vy * dt;
@@ -641,7 +655,7 @@ export class World {
 
     // tyre wear
     if (!inPit && !this.tyre.punctured) {
-      const dWear = wearDelta(this.tyre.compound, this.speed, dt);
+      const dWear = wearDelta(this.tyre.compound, this.speed, dt, this.car.tyreWear);
       this.tyre.wear = Math.min(100, this.tyre.wear + dWear);
       if (this.tyre.wear >= 100) {
         this.tyre.punctured = true;
@@ -732,7 +746,7 @@ export class World {
       }
       case 'rival': {
         const teammate = Math.random() < TEAMMATE.chance && t > 15;
-        const driver = pickDriver(teammate);
+        const driver = pickDriver(teammate, this.car.team);
         const team = teamOf(driver);
         const w = PLAYER.width * 0.92;
         const h = PLAYER.height * 0.92;
@@ -743,7 +757,7 @@ export class World {
           id: nextId++, type, x: fromBehind ? -w - 40 : right + w, y: this.laneY(h), w, h, rel, vy: 0,
           // under the safety car rivals run at (about) its pace in absolute terms, not relative to you
           scPace: opts.scRival ? rand(...SAFETY_CAR.bunchSpread) : 0,
-          team, driver, fromBehind, weave: !opts.scRival && Math.random() < 0.4, weavePhase: rand(0, 6.28), passed: false, frame: rand(0, 8),
+          team, driver, teammate, fromBehind, weave: !opts.scRival && Math.random() < 0.4, weavePhase: rand(0, 6.28), passed: false, frame: rand(0, 8),
           defend: !fromBehind && !teammate && Math.random() < RIVAL_AI.defendChance, brake: 0,
         });
         break;
@@ -804,7 +818,7 @@ export class World {
           } else {
             hz.grid = false;
             hz.weave = Math.random() < 0.4;
-            hz.defend = hz.x > p.x && !hz.team.teammate && Math.random() < RIVAL_AI.defendChance;
+            hz.defend = hz.x > p.x && !hz.teammate && Math.random() < RIVAL_AI.defendChance;
           }
         }
         if (hz.contactCd > 0) hz.contactCd -= dt;
@@ -868,11 +882,11 @@ export class World {
     let color = '#ffd400';
     if (hz.grid) { pts = START.overtakeBonus; label = `+${pts} START`; color = '#c9ced9'; }
     if (this.sc.restartTimer > 0) { pts *= SCORING_EXTRA.restartMultiplier; label = `+${pts} RESTART`; color = '#2ecc71'; }
-    if (hz.team.teammate) { pts += TEAMMATE.bonus; label = `+${pts} MULTI 21`; color = '#e10600'; this.run.teammatePasses += 1; }
+    if (hz.teammate) { pts += TEAMMATE.bonus; label = `+${pts} MULTI 21`; color = '#e10600'; this.run.teammatePasses += 1; }
     if (hz.driver?.legend) { pts += LEGEND_BONUS; label = `+${pts} LEGEND`; color = '#d4af37'; this.run.legendPasses = (this.run.legendPasses || 0) + 1; }
     this.bonus += pts;
     this.addPopup(p.x, p.y - 44, label, color);
-    if (hz.team.teammate) this.emit('teammate', { count: this.run.teammatePasses, driver: hz.driver });
+    if (hz.teammate) this.emit('teammate', { count: this.run.teammatePasses, driver: hz.driver });
     else this.emit('overtake', { count: this.overtakes, team: hz.team.name, driver: hz.driver });
   }
 
@@ -890,7 +904,7 @@ export class World {
       if (gap < SCORING.closeCallDistance && !hz.nearMiss && (hz.type === 'tyre' || hz.type === 'rival' || hz.type === 'stranded')) {
         hz.nearMiss = true;
         this.closeCalls += 1;
-        const teammate = hz.type === 'rival' && hz.team.teammate;
+        const teammate = hz.type === 'rival' && hz.teammate;
         const pts = teammate ? SCORING_EXTRA.closeCallTeammate : SCORING.closeCall;
         this.bonus += pts;
         this.addPopup(hz.x, hz.y - 30, `+${pts}`, teammate ? '#e10600' : '#7df9ff');
@@ -936,7 +950,7 @@ export class World {
         if (!hz.taken) {
           hz.taken = true;
           hz.dead = true;
-          this.ers.charge = Math.min(ERS.max, this.ers.charge + ERS.drsRefill);
+          this.ers.charge = Math.min(ERS.max, this.ers.charge + ERS.drsRefill * this.car.ers);
           this.bonus += 20;
           this.addPopup(hz.x, hz.y - 40, '+20 DRS', '#2ecc71');
           this.emit('drs');
@@ -977,9 +991,10 @@ export class World {
     this.run.contacts += 1;
     this.hurt(part, amount, { driver: hz.driver, cause: 'contact' });
   }
-  /** Applies damage to a part and reports it (with `lost` when the part just reached 100). */
-  hurt(part, amount, ctx) {
+  /** Applies damage to a part and reports it (with `lost` when the part just reached 100). Tough cars take less. */
+  hurt(part, rawAmount, ctx) {
     const p = this.player;
+    const amount = rawAmount / this.car.durability;
     const before = p.parts[part];
     p.parts[part] = Math.min(100, before + amount);
     this.shake = Math.max(this.shake, 0.35 + amount / 120);

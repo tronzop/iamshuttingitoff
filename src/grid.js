@@ -1,10 +1,12 @@
 // The grid: teams, liveries, drivers, helmets and the meme lines that go with
 // them. Pure data — world.js picks from it, render.js paints it, radio.js quotes it.
+// The player drives for one of the modern teams (see cars.js); that team's drivers become
+// the team-mate and the rest of the grid are rivals.
 //
 // Colours are approximations of real liveries; helmets are two-tone caricatures.
 
 export const TEAMS = {
-  ferrari: { id: 'ferrari', name: 'Ferrari', primary: '#e10600', accent: '#ffd400', teammate: true },
+  ferrari: { id: 'ferrari', name: 'Ferrari', primary: '#e10600', accent: '#ffd400' },
   redbull: { id: 'redbull', name: 'Red Bull', primary: '#1e2a78', accent: '#ffcc00', stripe: '#e10600' },
   mclaren: { id: 'mclaren', name: 'McLaren', primary: '#ff8000', accent: '#111', stripe: '#47c7fc' },
   mercedes: { id: 'mercedes', name: 'Mercedes', primary: '#b8bcc4', accent: '#00d2be', stripe: '#111' },
